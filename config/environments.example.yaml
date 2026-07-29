@@ -1,0 +1,7 @@
+environments:
+  local:
+    provider: local
+    log_sources:
+      order-service:
+        path: fixtures/order-service.log
+        description: Order service application log

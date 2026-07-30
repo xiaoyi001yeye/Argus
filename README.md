@@ -44,10 +44,58 @@ configuration is not at `config/environments.yaml`.
 Set `ARGUS_CACHE_DIR` to override the default filename cache directory
 (`~/.cache/argus/log-files`).
 
+## Python Package
+
+Build standard Python artifacts:
+
+```bash
+./scripts/build-python-package.sh
+```
+
+Copy the generated wheel from `dist/` to a target macOS or Linux machine, then
+install it with pip:
+
+```bash
+python3 -m pip install argus_log_diagnostics-*.whl
+```
+
+For an isolated command-line install, use pipx:
+
+```bash
+pipx install argus_log_diagnostics-*.whl
+```
+
+Then configure your MCP client to run the installed `argus` command and set
+`ARGUS_CONFIG` to your environment config path.
+
+## Portable Installer
+
+Build a portable installer archive from this checkout:
+
+```bash
+./scripts/package-installer.sh
+```
+
+Copy the generated `dist/argus-installer-*.tar.gz` to a target macOS or Linux
+machine, then run:
+
+```bash
+tar -xzf argus-installer-*.tar.gz
+cd argus-installer-*
+./scripts/install.sh
+```
+
+The installer creates an isolated virtual environment under
+`~/.local/share/argus`, installs the `argus` command, creates a starter config at
+`~/.config/argus/environments.yaml` if one does not exist, and prints the Codex
+MCP registration command.
+
 ## Documentation
 
 - [在 Codex 中使用 Argus](docs/CODEX_USAGE_ZH.md): installation, MCP configuration,
   verification, and an end-to-end diagnostic example.
+- [使用 Wheel 安装 Argus](docs/WHEEL_INSTALL_ZH.md): install the generated wheel
+  package on a target machine and register it as an MCP server.
 - [在 GitHub Copilot 中使用 Argus](docs/COPILOT_USAGE_ZH.md): VS Code Copilot Chat
   and Copilot CLI MCP configuration, verification, and diagnostic prompts.
 - [环境管理说明](docs/ENVIRONMENT_MANAGEMENT_ZH.md): local and SSH environment

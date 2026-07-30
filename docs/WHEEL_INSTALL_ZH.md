@@ -19,7 +19,25 @@ argus_log_diagnostics-0.1.0-py3-none-any.whl
 python3 --version
 ```
 
-## 2. 安装方式一：使用 pipx
+## 2. 从 GitHub Actions 下载 Wheel
+
+仓库的 GitHub Actions 会在 push、pull request 和手动触发时自动构建 Python 包。
+
+下载步骤：
+
+1. 打开 GitHub 仓库的 `Actions` 页面。
+2. 选择 `Build Python Package` workflow。
+3. 打开一次成功的运行记录。
+4. 在页面底部的 `Artifacts` 区域下载 `argus-python-package`。
+5. 解压 artifact，里面会包含 `.whl` 和源码包。
+
+常用安装文件是：
+
+```text
+argus_log_diagnostics-0.1.0-py3-none-any.whl
+```
+
+## 3. 安装方式一：使用 pipx
 
 推荐使用 `pipx` 安装命令行工具。它会为 Argus 创建独立环境，不污染系统 Python。
 
@@ -45,7 +63,7 @@ argus
 
 `argus` 使用 STDIO MCP 传输。直接运行后没有 Web 页面，会等待 MCP 客户端输入，这是正常现象。按 `Ctrl+C` 停止。
 
-## 3. 安装方式二：使用 venv + pip
+## 4. 安装方式二：使用 venv + pip
 
 如果不使用 pipx，可以手动创建虚拟环境：
 
@@ -60,7 +78,7 @@ python3 -m venv ~/.local/share/argus/.venv
 ~/.local/share/argus/.venv/bin/argus
 ```
 
-## 4. 准备配置文件
+## 5. 准备配置文件
 
 创建配置目录：
 
@@ -94,7 +112,7 @@ environments:
 chmod 600 ~/.config/argus/environments.yaml
 ```
 
-## 5. 注册到 Codex
+## 6. 注册到 Codex
 
 如果使用 `pipx` 安装：
 
@@ -120,7 +138,7 @@ codex mcp list
 
 修改 MCP 配置后，需要重启 Codex。
 
-## 6. 注册到 GitHub Copilot
+## 7. 注册到 GitHub Copilot
 
 GitHub Copilot 常见有两种使用入口：
 
@@ -134,7 +152,7 @@ GitHub Copilot 常见有两种使用入口：
 $HOME/.local/share/argus/.venv/bin/argus
 ```
 
-### 6.1 VS Code Copilot Chat
+### 7.1 VS Code Copilot Chat
 
 VS Code 的 MCP 配置文件通常放在两个位置之一：
 
@@ -184,7 +202,7 @@ VS Code 的 MCP 配置文件通常放在两个位置之一：
 - `search_logs`
 - `get_log_context`
 
-### 6.2 Copilot CLI
+### 7.2 Copilot CLI
 
 如果使用 `pipx` 安装，可以用命令添加：
 
@@ -246,7 +264,7 @@ copilot mcp add argus \
 注意：VS Code Copilot Chat 使用顶层 `servers`；Copilot CLI 使用 `mcpServers`。
 两者格式不同，不能直接混用。
 
-## 7. 在 AI 终端中验证
+## 8. 在 AI 终端中验证
 
 启动 Codex 后输入：
 
@@ -263,7 +281,7 @@ copilot mcp add argus \
 在 VS Code Copilot Chat 的 Agent 模式，或 Copilot CLI 交互模式中，也可以输入同样的提示词。
 如果 Copilot 要求确认工具调用，请确认工具名称和参数符合预期后再继续。
 
-## 8. 常见问题
+## 9. 常见问题
 
 ### 找不到 argus 命令
 

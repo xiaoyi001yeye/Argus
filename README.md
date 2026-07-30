@@ -34,6 +34,9 @@ pytest
 Point an MCP client at the `argus` command. Set `ARGUS_CONFIG` if the
 configuration is not at `config/environments.yaml`.
 
+For installation, MCP configuration, verification, and an end-to-end diagnostic
+example, see [在 Codex 中使用 Argus](docs/CODEX_USAGE_ZH.md).
+
 ## Project layout
 
 ```text

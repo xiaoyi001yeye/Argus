@@ -1,0 +1,246 @@
+sequenceDiagram
+    autonumber
+    actor Client as MCP Client
+    participant MCP as FastMCP [third-party boundary]
+    participant Server as argus.server
+    participant Config as argus.config
+    participant YAML as PyYAML [third-party boundary]
+    participant Service as LogService
+    participant Resolver as providers.base
+    participant Provider as Local/Ssh Provider
+    participant Redact as argus.redaction
+    participant Model as argus.models
+    participant FS as Local filesystem [system boundary]
+    participant OpenSSH as subprocess + OpenSSH [tool boundary]
+    participant Paramiko as Paramiko [third-party boundary]
+    participant Remote as Remote sh/find/wc/cat [tool boundary]
+
+    Note over Client,MCP: Process startup
+    Server->>MCP: FastMCP("Argus")
+    Server->>MCP: tool() registers 4 entry functions
+    Server->>Server: main()
+    Server->>MCP: run(transport="stdio")
+    MCP-->>Client: MCP stdio transport ready
+
+    rect rgb(238, 245, 255)
+        Note over Server,Provider: Common initialization executed independently by every tool entry
+        Server->>Server: _service(environment)
+        Server->>Server: _config_path()
+        Server->>FS: getenv(ARGUS_CONFIG) + Path.resolve()
+        FS-->>Server: config path
+        Server->>Config: load_config(path)
+        Config->>FS: Path.is_file()
+        FS-->>Config: exists
+        Config->>FS: Path.read_text(utf-8)
+        FS-->>Config: YAML text
+        Config->>YAML: yaml.safe_load(text)
+        YAML-->>Config: raw mapping
+        loop each configured environment
+            Config->>Config: _parse_environment(name, raw, project_root)
+            alt local provider with relative source path
+                Config->>FS: Path.resolve()
+                FS-->>Config: absolute allow-listed path
+            else ssh provider with explicit ssh config
+                Config->>Config: _parse_ssh_config(name, ssh)
+                Config->>Config: _required_string(host)
+                Config->>Config: _required_string(username)
+                Config->>Config: _required_string(password)
+                Config->>Config: _optional_int(port)
+                Config->>Config: _optional_int(connect_timeout)
+                opt known_hosts configured
+                    Config->>FS: Path.expanduser()
+                    FS-->>Config: known_hosts path
+                end
+            end
+        end
+        Config-->>Server: ArgusConfig
+        Server->>Server: _provider(selected environment)
+        alt provider == local
+            Server->>Provider: LocalFileProvider.__init__(sources)
+        else provider == ssh with connection config
+            Server->>Provider: SshLogProvider.__init__(host, sources, ssh_config)
+        else provider == ssh with alias
+            Server->>Provider: SshLogProvider.__init__(ssh_alias, sources)
+        end
+        Server->>Service: LogService.__init__(environment, provider)
+        Service-->>Server: service
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Client,Model: Entry 1 - list_log_sources
+        Client->>MCP: tools/call list_log_sources(environment)
+        MCP->>Server: list_log_sources(environment)
+        Note right of Server: Executes the common _service flow above
+        Server->>Service: list_sources()
+        Service->>Service: sort environment.sources
+        Service->>Model: LogSource(id, description)
+        Model-->>Service: allow-listed logical sources
+        Service-->>Server: list[LogSource]
+        loop each LogSource
+            Server->>Model: LogSource.to_dict()
+            Model->>Model: dataclasses.asdict()
+            Model-->>Server: source dictionary
+        end
+        Server-->>MCP: {"sources": [...]}
+        MCP-->>Client: tool result
+    end
+
+    rect rgb(255, 248, 235)
+        Note over Client,Remote: Entry 2 - list_log_files
+        Client->>MCP: tools/call list_log_files(environment, source)
+        MCP->>Server: list_log_files(environment, source)
+        Note right of Server: Executes the common _service flow above
+        Server->>Service: list_files(source)
+        Service->>Provider: list_files(source)
+        Provider->>Resolver: resolve_log_source(sources, source)
+        opt source/file.log virtual source
+            Resolver->>Resolver: _is_safe_log_file_name(file_name)
+        end
+        Resolver-->>Provider: ResolvedLogSource
+        alt LocalFileProvider.list_files
+            Provider->>FS: Path.is_file() / Path.is_dir()
+            alt configured file
+                Provider->>FS: Path.stat()
+                FS-->>Provider: file size
+            else configured directory
+                Provider->>FS: Path.glob("*.log") + stat()
+                FS-->>Provider: sorted file names and sizes
+            end
+        else SshLogProvider.list_files
+            Provider->>Provider: shlex.quote(path)
+            Provider->>Provider: format _REMOTE_LIST_FILES_SCRIPT
+            Provider->>Provider: _run_ssh_script(source, script, "listing")
+            alt ssh alias
+                Provider->>Provider: _run_openssh_script(script)
+                Provider->>OpenSSH: subprocess.run(["ssh", ..., "sh", "-s"], input=script)
+                OpenSSH->>Remote: execute sh script
+            else password ssh config
+                Provider->>Provider: _run_paramiko_script(script)
+                Provider->>Paramiko: SSHClient()
+                Provider->>Paramiko: load_system_host_keys()
+                opt configured known_hosts
+                    Provider->>Paramiko: load_host_keys(path)
+                end
+                Provider->>Paramiko: set_missing_host_key_policy(RejectPolicy)
+                Provider->>Paramiko: connect(...)
+                Provider->>Paramiko: exec_command("sh -s")
+                Provider->>Paramiko: stdin.write(script) + shutdown_write()
+                Paramiko->>Remote: execute sh script
+            end
+            Remote->>Remote: test -f/-d, find, sort, wc, basename, printf
+            Remote-->>Provider: tab-separated name and size
+            Provider->>Provider: parse stdout with rpartition()
+            opt SSH command failed
+                Provider->>Provider: _friendly_ssh_error(detail)
+            end
+            Provider->>Paramiko: client.close()
+        end
+        Provider-->>Service: list[LogFile]
+        Service-->>Server: list[LogFile]
+        loop each LogFile
+            Server->>Model: LogFile.to_dict()
+            Model->>Model: dataclasses.asdict()
+            Model-->>Server: file dictionary
+        end
+        Server-->>MCP: {"files": [...]}
+        MCP-->>Client: tool result
+    end
+
+    rect rgb(250, 240, 255)
+        Note over Client,Remote: Entry 3 - search_logs
+        Client->>MCP: tools/call search_logs(environment, source, query, bounds, limit)
+        MCP->>Server: search_logs(...)
+        Note right of Server: Executes the common _service flow above
+        Server->>Service: search(source, query, start_time, end_time, limit)
+        Service->>Service: re.split(OR) + casefold()
+        Service->>Service: _parse_bound(start_time)
+        Service->>Service: _parse_bound(end_time)
+        Service->>Service: clamp limit to 1..200
+        Service->>Provider: read_lines(source)
+        Provider->>Resolver: resolve_log_source(sources, source)
+        opt source/file.log virtual source
+            Resolver->>Resolver: _is_safe_log_file_name(file_name)
+        end
+        Resolver-->>Provider: ResolvedLogSource
+        alt LocalFileProvider.read_lines
+            Provider->>FS: Path.is_file() + Path.stat()
+            FS-->>Provider: availability and size
+            Provider->>FS: Path.read_text(utf-8, errors="replace")
+            FS-->>Provider: log text
+        else SshLogProvider.read_lines
+            Provider->>Provider: shlex.quote(path)
+            Provider->>Provider: format _REMOTE_SCRIPT
+            Provider->>Provider: _run_ssh_script(source, script, "reading")
+            alt ssh alias
+                Provider->>Provider: _run_openssh_script(script)
+                Provider->>OpenSSH: subprocess.run(["ssh", ..., "sh", "-s"], input=script)
+                OpenSSH->>Remote: execute sh script
+            else password ssh config
+                Provider->>Provider: _run_paramiko_script(script)
+                Provider->>Paramiko: SSHClient + host-key setup
+                Provider->>Paramiko: connect(...)
+                Provider->>Paramiko: exec_command("sh -s")
+                Provider->>Paramiko: stdin.write(script) + shutdown_write()
+                Paramiko->>Remote: execute sh script
+            end
+            Remote->>Remote: test source, find/sort, wc size, cat log
+            Remote-->>Provider: stdout log text
+            opt SSH command failed
+                Provider->>Provider: _friendly_ssh_error(detail)
+            end
+            Provider->>Paramiko: client.close()
+        end
+        Provider->>Provider: text.splitlines()
+        Provider-->>Service: list[str]
+        loop each raw log line
+            Service->>Service: _parse_line(raw_line)
+            Service->>Service: _try_parse_timestamp(timestamp)
+            Service->>Service: filter time + case-insensitive query terms
+            opt matching line under limit
+                Service->>Service: _safe_line(message)
+                Service->>Redact: redact(message[0:4000])
+                Redact->>Redact: regex.sub sensitive assignments
+                Redact-->>Service: redacted message
+                Service->>Service: _cursor(source, line_number)
+                Service->>Model: LogMatch(...)
+            end
+        end
+        Service-->>Server: matches, truncated
+        loop each LogMatch
+            Server->>Model: LogMatch.to_dict()
+            Model->>Model: dataclasses.asdict()
+            Model-->>Server: match dictionary
+        end
+        Server-->>MCP: {"matches": [...], "truncated": bool}
+        MCP-->>Client: tool result
+    end
+
+    rect rgb(235, 250, 255)
+        Note over Client,Remote: Entry 4 - get_log_context
+        Client->>MCP: tools/call get_log_context(environment, source, cursor, before, after)
+        MCP->>Server: get_log_context(...)
+        Note right of Server: Executes the common _service flow above
+        Server->>Service: context(source, cursor, before, after)
+        Service->>Service: _decode_cursor(source, cursor)
+        Service->>Service: clamp before/after to 0..100
+        Service->>Provider: read_lines(source)
+        Note over Provider,Remote: Same LocalFileProvider/SshLogProvider read_lines flow as search_logs
+        Provider-->>Service: list[str]
+        Service->>Service: calculate bounded start/end line numbers
+        loop each selected context line
+            Service->>Service: _cursor(source, line_number)
+            Service->>Service: _safe_line(raw line)
+            Service->>Redact: redact(line[0:4000])
+            Redact->>Redact: regex.sub sensitive assignments
+            Redact-->>Service: redacted line
+            Service->>Model: ContextLine(cursor, message, is_match)
+        end
+        Service-->>Server: list[ContextLine]
+        loop each ContextLine
+            Server->>Model: ContextLine.to_dict()
+            Model->>Model: dataclasses.asdict()
+            Model-->>Server: context dictionary
+        end
+        Server-->>MCP: {"lines": [...]}
+        MCP-->>Client: tool result
+    end

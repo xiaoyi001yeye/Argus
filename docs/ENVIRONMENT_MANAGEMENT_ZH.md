@@ -444,22 +444,23 @@ ls -l /absolute/path/to/config/environments.yaml
 
 ### Unknown log source
 
-确认 source ID 存在于所选环境的 `log_sources` 中。
+确认 source ID 存在于所选环境的 `log_sources` 中；如果要读取目录 source 下的单个文件，请使用 `source/file.log`，且文件名只能是该目录第一层的 `*.log` 文件。
 
 ### Permission denied
 
 远程账号没有日志读取权限。应调整只读用户或日志用户组权限，不要直接授予 `sudo`。
 
-### SSH reading is not enabled in the MVP
+### SSH authentication failed
 
-这是当前版本的预期提示，说明 SSH Provider 尚未实现。完成 SSH 配置模型、认证、主机校验、远程读取和测试后才能启用。
+如果使用 `ssh_alias`，请确认别名已经配置免密登录；该路径仍然使用非交互式 OpenSSH。
+
+如果使用 `ssh.host`、`ssh.username` 和 `ssh.password`，Argus 会在程序内使用密码认证。请确认密码正确，并且目标主机已经存在于系统 `known_hosts` 或配置的 `ssh.known_hosts` 中。
 
 ## 12. 实现清单
 
 要让本文中的 SSH 环境真正可用，需要完成：
 
 - 扩展 `config.py`，解析 `ssh.host`、`port`、`username`、`password`、`known_hosts` 和超时；
-- 对密码字段进行脱敏表示；
 - 实现 `SshLogProvider` 的用户名密码认证；
 - 验证 SSH 主机密钥；
 - 只允许访问配置中的 source ID 和路径；
@@ -469,5 +470,3 @@ ls -l /absolute/path/to/config/environments.yaml
 - 补充配置校验、认证失败、超时、权限不足和主机校验测试；
 - 更新 `environments.example.yaml`；
 - 确认所有 MCP 响应都不会泄露凭据。
-
-在这些工作完成之前，SSH 配置属于设计规范，不应宣称为当前可用功能。

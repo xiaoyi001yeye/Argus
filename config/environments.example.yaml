@@ -5,3 +5,16 @@ environments:
       order-service:
         path: fixtures/order-service.log
         description: Order service application log
+  ssh-password:
+    provider: ssh
+    ssh:
+      host: 172.17.162.104
+      port: 22
+      username: root
+      password: "CHANGE_ME"
+      connect_timeout: 15
+      known_hosts: ~/.ssh/known_hosts
+    log_sources:
+      appserver:
+        path: /var/log/app/app.log
+        description: Remote application log

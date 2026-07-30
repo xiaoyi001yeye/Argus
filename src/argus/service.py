@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
+from argus.cache import CacheSnapshot, LogFileCache
 from argus.config import EnvironmentConfig
-from argus.models import ContextLine, LogMatch, LogSource
+from argus.models import ContextLine, LogFile, LogMatch, LogSource
 from argus.providers.base import LogProvider
 from argus.redaction import redact
 
@@ -14,18 +17,48 @@ _PREFIX = re.compile(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class FileListing:
+    files: list[LogFile]
+    extracted_archives: list[str]
+    cache: CacheSnapshot | None
+
+    def to_dict(self) -> dict[str, Any]:
+        extractable_archives = [
+            file.name for file in self.files if file.archive_status == "extractable"
+        ]
+        result: dict[str, Any] = {
+            "files": [file.to_dict() for file in self.files],
+            "extractable_archives": extractable_archives,
+            "extracted_archives": self.extracted_archives,
+            "requires_extraction_confirmation": bool(extractable_archives),
+            "cache": self.cache.to_dict() if self.cache else None,
+        }
+        if extractable_archives:
+            result["suggested_question"] = (
+                f"Found {len(extractable_archives)} ZIP archive(s) that can be extracted in place. "
+                "Ask the user whether to extract them, then call list_log_files again with "
+                "extract_archives=true only after explicit confirmation."
+            )
+        return result
+
+
 class LogService:
     def __init__(
         self,
         environment: EnvironmentConfig,
         provider: LogProvider,
         *,
+        environment_name: str = "default",
+        file_cache: LogFileCache | None = None,
         max_results: int = 200,
         max_context_lines: int = 100,
         max_line_length: int = 4_000,
     ) -> None:
         self._environment = environment
         self._provider = provider
+        self._environment_name = environment_name
+        self._file_cache = file_cache
         self._max_results = max_results
         self._max_context_lines = max_context_lines
         self._max_line_length = max_line_length
@@ -35,6 +68,35 @@ class LogService:
             LogSource(id=source_id, description=source.description)
             for source_id, source in sorted(self._environment.sources.items())
         ]
+
+    def list_files(self, source_id: str, *, extract_archives: bool = False) -> FileListing:
+        previous = (
+            self._file_cache.load(self._environment_name, source_id)
+            if self._file_cache
+            else None
+        )
+        files = _restore_extracted_archives(self._provider.list_files(source_id), previous)
+        extracted_archives: list[str] = []
+        if extract_archives:
+            archive_names = [
+                file.name for file in files if file.archive_status == "extractable"
+            ]
+            extracted_archives = self._provider.extract_archives(source_id, archive_names)
+            files = _restore_extracted_archives(self._provider.list_files(source_id), previous)
+            extracted_names = set(extracted_archives)
+            files = [
+                replace(file, archive_status="extracted")
+                if file.name in extracted_names
+                else file
+                for file in files
+            ]
+
+        cache = (
+            self._file_cache.refresh(self._environment_name, source_id, files)
+            if self._file_cache
+            else None
+        )
+        return FileListing(files=files, extracted_archives=extracted_archives, cache=cache)
 
     def search(
         self,
@@ -151,3 +213,23 @@ def _decode_cursor(source_id: str, cursor: str) -> int:
     if line_number < 1:
         raise ValueError("invalid cursor")
     return line_number
+
+
+def _restore_extracted_archives(
+    files: list[LogFile],
+    previous: CacheSnapshot | None,
+) -> list[LogFile]:
+    if previous is None:
+        return files
+    previous_by_name = {file.name: file for file in previous.files}
+    return [
+        replace(file, archive_status="extracted")
+        if (
+            file.kind == "zip"
+            and (cached := previous_by_name.get(file.name)) is not None
+            and cached.archive_status == "extracted"
+            and file.same_version_as(cached)
+        )
+        else file
+        for file in files
+    ]

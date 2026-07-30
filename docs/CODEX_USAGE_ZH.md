@@ -211,6 +211,14 @@ Codex 通常会依次执行以下调用。
 list_log_sources(environment="local")
 ```
 
+如果 source 指向目录，可以先列出该 source 下的 `*.log` 文件：
+
+```text
+list_log_files(environment="local", source="order-service")
+```
+
+随后可用 `order-service/error.log` 作为 `source`，只搜索这个文件。
+
 ### 搜索异常
 
 ```text
